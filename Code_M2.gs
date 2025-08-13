@@ -11,37 +11,36 @@ var CONFIG = {
   MAX_RETRIES: 3
 };
 
-// Enhanced menu creation with Milestone 2 options
+// Menu français simplifié - Milestone 2
 function onOpen() {
   try {
     var ui = SpreadsheetApp.getUi();
-    var menu = ui.createMenu('🛒 Shopify Catalog');
+    var menu = ui.createMenu('🛍️ Catalogue Shopify');
     
-    // Milestone 1 Functions (Enhanced)
-    menu.addItem('📥 Import All Products & Variants', 'importAllProducts');
-    menu.addItem('📦 Import Products Only', 'importProducts');
-    menu.addItem('🔧 Import Variants Only', 'importVariants');
-    
-    menu.addSeparator();
-    
-    // NEW: Milestone 2 Functions
-    menu.addSubMenu(ui.createMenu('🧪 Dry-Run Validation')
-      .addItem('🔍 Validate Products (Dry-Run)', 'dryRunProducts')
-      .addItem('🔍 Validate Variants (Dry-Run)', 'dryRunVariants')
-      .addItem('🔍 Validate All (Dry-Run)', 'dryRunAll'));
-    
-    menu.addSubMenu(ui.createMenu('⚡ Smart Import')
-      .addItem('🔄 Incremental Products', 'incrementalProducts')
-      .addItem('🔄 Incremental Variants', 'incrementalVariants')
-      .addItem('🔄 Incremental All', 'incrementalAll'));
+    // Actions principales
+    menu.addItem('📥 Importer (Produits+Variants)', 'importAllProducts');
+    menu.addItem('⚡ Mise à jour (modifications Produit/Variant)', 'incrementalAll');
+    menu.addItem('🧪 Vérifier avant import (Aperçu sécurisé)', 'dryRunAll');
     
     menu.addSeparator();
     
-    // Configuration and utilities
-    menu.addItem('⚙️ Setup Configuration', 'setupConfig');
-    menu.addItem('🔗 Test API Connection', 'testConnection');
-    menu.addItem('🔍 Debug API Issues', 'runDebugTest');
-    menu.addItem('📊 View Import Statistics', 'viewImportStats');
+    // Imports spécialisés
+    menu.addSubMenu(ui.createMenu('🔧 Imports spécialisés')
+      .addItem('📦 Importer produits uniquement', 'importProducts')
+      .addItem('🔧 Importer variantes uniquement', 'importVariants')
+      .addItem('📋 Importer métachamps "Produit"', 'importProductMetafields')
+      .addItem('📋 Importer métachamps "Variant"', 'importVariantMetafields')
+      .addItem('🖼️ Importer images produits', 'importProductImages')
+      .addItem('📦 Importer stock et inventaire', 'importInventory'));
+
+    menu.addSeparator();
+    
+    // Configuration
+    menu.addSubMenu(ui.createMenu('⚙️ Configuration')
+      .addItem('🔗 Tester la connexion Shopify', 'testConnection')
+      .addItem('📊 Statistiques des imports', 'viewImportStats')
+      .addItem('🔍 Diagnostiquer un problème', 'runDebugTest')
+      .addItem('⚙️ Paramètres de connexion', 'setupConfig'));
     
     menu.addToUi();
     
@@ -435,4 +434,39 @@ function testConnection() {
     Logger.log('Connection test failed: ' + error.message);
     SpreadsheetApp.getUi().alert('Connection Test Failed', error.message, SpreadsheetApp.getUi().ButtonSet.OK);
   }
+}
+
+// ===== NOUVELLES FONCTIONS POUR MENU FRANÇAIS =====
+
+// Fonctions futures - Milestone 3
+function importProductMetafields() {
+  var ui = SpreadsheetApp.getUi();
+  ui.alert('🚧 Fonctionnalité à venir', 
+    'L\'import des métachamps produits sera disponible dans Milestone 3.\n\n' +
+    'Cette fonction permettra d\'importer tous les champs personnalisés de vos produits.', 
+    ui.ButtonSet.OK);
+}
+
+function importVariantMetafields() {
+  var ui = SpreadsheetApp.getUi();
+  ui.alert('🚧 Fonctionnalité à venir', 
+    'L\'import des métachamps variantes sera disponible dans Milestone 3.\n\n' +
+    'Cette fonction permettra d\'importer tous les champs personnalisés de vos variantes.', 
+    ui.ButtonSet.OK);
+}
+
+function importProductImages() {
+  var ui = SpreadsheetApp.getUi();
+  ui.alert('🚧 Fonctionnalité à venir', 
+    'L\'import des images produits sera disponible dans Milestone 3.\n\n' +
+    'Cette fonction permettra de gérer toutes les images de vos produits.', 
+    ui.ButtonSet.OK);
+}
+
+function importInventory() {
+  var ui = SpreadsheetApp.getUi();
+  ui.alert('🚧 Fonctionnalité à venir', 
+    'L\'import du stock et inventaire sera disponible dans Milestone 3.\n\n' +
+    'Cette fonction permettra de gérer les niveaux de stock par localisation.', 
+    ui.ButtonSet.OK);
 }
