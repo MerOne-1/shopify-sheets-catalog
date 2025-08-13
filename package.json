@@ -1,0 +1,56 @@
+{
+  "name": "shopify-sheets-catalog",
+  "version": "1.0.0",
+  "description": "Google Sheets-based Shopify catalog management system with TypeScript and Google Apps Script",
+  "main": "src/Code.ts",
+  "scripts": {
+    "build": "node scripts/build.js",
+    "dev": "npm run build && clasp push",
+    "deploy": "npm run build && clasp push",
+    "watch": "npm run build && clasp push --watch",
+    "logs": "clasp logs",
+    "open": "clasp open",
+    "setup": "clasp login && clasp create --type sheets --title 'Shopify Catalog Management'",
+    "compile": "tsc",
+    "type-check": "tsc --noEmit",
+    "test": "npm run test:unit && npm run test:integration",
+    "test:unit": "jest tests/unit",
+    "test:integration": "jest tests/integration",
+    "lint": "eslint src/**/*.ts",
+    "docs": "typedoc src"
+  },
+  "keywords": [
+    "shopify",
+    "google-sheets",
+    "google-apps-script",
+    "typescript",
+    "catalog-management",
+    "e-commerce",
+    "bulk-operations",
+    "inventory-management"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "devDependencies": {
+    "@google/clasp": "^2.4.2",
+    "@types/google-apps-script": "^1.0.83",
+    "typescript": "^5.3.3",
+    "eslint": "^8.57.0",
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "@typescript-eslint/parser": "^6.21.0",
+    "jest": "^29.7.0",
+    "typedoc": "^0.25.7"
+  },
+  "dependencies": {},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yourusername/shopify-sheets-catalog.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/shopify-sheets-catalog/issues"
+  },
+  "homepage": "https://github.com/yourusername/shopify-sheets-catalog#readme",
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
