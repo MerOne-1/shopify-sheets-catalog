@@ -218,7 +218,7 @@ BaseImporter.prototype.getIncrementalChanges = function(newData, existingData) {
       changes.toAdd.push(newRecord);
     } else {
       var newHash = this.calculateHash(newRecord);
-      var existingHash = existingRecord._hash;
+      var existingHash = this.calculateHash(existingRecord);
       
       if (newHash !== existingHash) {
         changes.toUpdate.push(newRecord);
@@ -250,4 +250,51 @@ BaseImporter.prototype.getExistingSheetData = function(sheet) {
   }
   
   return data;
+};
+
+ValidationEngine.prototype.calculateHash = function(data) {
+  // Normalize data by extracting only core comparable fields
+  var normalizedData = this.normalizeDataForHash(data);
+  var hashInput = JSON.stringify(normalizedData);
+  return Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, hashInput)
+    .map(function(byte) {
+      return (byte + 256).toString(16).slice(1);
+    }).join('');
+};
+
+ValidationEngine.prototype.normalizeDataForHash = function(data) {
+  // Define core fields that should be compared (exclude metadata and API-specific fields)
+  var coreFields = [
+    'id', 'title', 'handle', 'body_html', 'vendor', 'product_type',
+    'created_at', 'updated_at', 'published_at', 'template_suffix',
+    'tags', 'status'
+  ];
+  
+  var normalized = {};
+  
+  // Extract only core fields in consistent order
+  for (var i = 0; i < coreFields.length; i++) {
+    var field = coreFields[i];
+    if (data[field] !== undefined && data[field] !== null) {
+      // Normalize the value
+      var value = data[field];
+      
+      // Convert arrays to sorted strings for consistent comparison
+      if (Array.isArray(value)) {
+        value = value.sort().join(',');
+      }
+      // Convert to string and trim whitespace
+      else if (typeof value === 'string') {
+        value = value.trim();
+      }
+      // Convert boolean published_at to consistent format
+      else if (field === 'published_at' && typeof value === 'boolean') {
+        value = value ? 'published' : '';
+      }
+      
+      normalized[field] = value;
+    }
+  }
+  
+  return normalized;
 };

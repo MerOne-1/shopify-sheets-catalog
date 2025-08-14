@@ -12,11 +12,50 @@ function BaseImporter() {
 }
 
 BaseImporter.prototype.calculateHash = function(data) {
-  var hashInput = JSON.stringify(data);
+  // Normalize data by extracting only core comparable fields
+  var normalizedData = this.normalizeDataForHash(data);
+  var hashInput = JSON.stringify(normalizedData);
   return Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, hashInput)
     .map(function(byte) {
       return (byte + 256).toString(16).slice(1);
     }).join('');
+};
+
+BaseImporter.prototype.normalizeDataForHash = function(data) {
+  // Define core fields that should be compared (exclude metadata and API-specific fields)
+  var coreFields = [
+    'id', 'title', 'handle', 'body_html', 'vendor', 'product_type',
+    'created_at', 'updated_at', 'published_at', 'template_suffix',
+    'tags', 'status'
+  ];
+  
+  var normalized = {};
+  
+  // Extract only core fields in consistent order
+  for (var i = 0; i < coreFields.length; i++) {
+    var field = coreFields[i];
+    if (data[field] !== undefined && data[field] !== null) {
+      // Normalize the value
+      var value = data[field];
+      
+      // Convert arrays to sorted strings for consistent comparison
+      if (Array.isArray(value)) {
+        value = value.sort().join(',');
+      }
+      // Convert to string and trim whitespace
+      else if (typeof value === 'string') {
+        value = value.trim();
+      }
+      // Convert boolean published_at to consistent format
+      else if (field === 'published_at' && typeof value === 'boolean') {
+        value = value ? 'published' : '';
+      }
+      
+      normalized[field] = value;
+    }
+  }
+  
+  return normalized;
 };
 
 BaseImporter.prototype.logProgress = function(message, count) {
@@ -220,11 +259,38 @@ BaseImporter.prototype.safeApiRequest = function(endpoint, retryCount) {
 BaseImporter.prototype.batchWriteToSheet = function(sheet, data) {
   if (data.length === 0) return;
   
-  var startRow = sheet.getLastRow() + 1;
-  if (startRow === 1) startRow = 2; // Skip header row
+  var existingData = this.getExistingSheetData(sheet);
+  var existingMap = {};
+  var existingRowMap = {};
   
-  var range = sheet.getRange(startRow, 1, data.length, data[0].length);
-  range.setValues(data);
+  // Build map of existing products and their row numbers
+  for (var i = 0; i < existingData.length; i++) {
+    var id = existingData[i].id;
+    existingMap[id] = existingData[i];
+    existingRowMap[id] = i + 2; // +2 because sheet is 1-indexed and has header
+  }
   
-  this.logProgress('Wrote ' + data.length + ' rows to sheet');
+  var updatedCount = 0;
+  var addedCount = 0;
+  
+  for (var j = 0; j < data.length; j++) {
+    var rowData = data[j];
+    var productId = rowData[0]; // ID is first column
+    
+    if (existingRowMap[productId]) {
+      // Update existing row
+      var rowNum = existingRowMap[productId];
+      var range = sheet.getRange(rowNum, 1, 1, rowData.length);
+      range.setValues([rowData]);
+      updatedCount++;
+    } else {
+      // Append new row
+      var lastRow = sheet.getLastRow() + 1;
+      var range = sheet.getRange(lastRow, 1, 1, rowData.length);
+      range.setValues([rowData]);
+      addedCount++;
+    }
+  }
+  
+  this.logProgress('Updated ' + updatedCount + ' rows, added ' + addedCount + ' new rows');
 };
