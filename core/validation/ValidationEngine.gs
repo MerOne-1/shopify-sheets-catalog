@@ -264,10 +264,15 @@ ValidationEngine.prototype.calculateHash = function(data) {
 
 ValidationEngine.prototype.normalizeDataForHash = function(data) {
   // Define core fields that should be compared (exclude metadata and API-specific fields)
+  // Includes both product and variant fields for comprehensive change detection
   var coreFields = [
     'id', 'title', 'handle', 'body_html', 'vendor', 'product_type',
     'created_at', 'updated_at', 'published_at', 'template_suffix',
-    'tags', 'status'
+    'tags', 'status',
+    // Variant fields - CRITICAL for detecting price/inventory changes
+    'price', 'compare_at_price', 'inventory_quantity', 'sku', 'barcode',
+    'weight', 'weight_unit', 'requires_shipping', 'taxable', 'fulfillment_service',
+    'inventory_management', 'inventory_policy', 'option1', 'option2', 'option3'
   ];
   
   var normalized = {};

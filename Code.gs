@@ -33,6 +33,9 @@ function onOpen() {
       .addItem('🖼️ Importer images produits', 'importProductImages')
       .addItem('📦 Importer stock et inventaire', 'importInventory'));
 
+    // Add export functionality (Milestone 3)
+    addExportMenuItems(menu);
+
     menu.addSeparator();
     
     // Configuration
