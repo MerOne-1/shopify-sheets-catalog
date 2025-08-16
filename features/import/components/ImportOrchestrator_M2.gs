@@ -88,3 +88,29 @@ ImportOrchestrator.prototype.importProductsOnly = function(options) {
 ImportOrchestrator.prototype.importVariantsOnly = function(options) {
   return this.variantImporter.import(options);
 };
+
+// Individual dry-run methods
+ImportOrchestrator.prototype.dryRunProducts = function() {
+  return this.productImporter.import({ dryRun: true });
+};
+
+ImportOrchestrator.prototype.dryRunVariants = function() {
+  return this.variantImporter.import({ dryRun: true });
+};
+
+ImportOrchestrator.prototype.dryRunAll = function() {
+  return this.importAll({ dryRun: true });
+};
+
+// Individual incremental methods
+ImportOrchestrator.prototype.incrementalProducts = function() {
+  return this.productImporter.import({ incremental: true });
+};
+
+ImportOrchestrator.prototype.incrementalVariants = function() {
+  return this.variantImporter.import({ incremental: true });
+};
+
+ImportOrchestrator.prototype.incrementalAll = function() {
+  return this.importAll({ incremental: true });
+};

@@ -303,3 +303,150 @@ ValidationEngine.prototype.normalizeDataForHash = function(data) {
   
   return normalized;
 };
+
+/**
+ * Validate all sheets in the spreadsheet
+ * @return {Object} Validation results for all sheets
+ */
+ValidationEngine.prototype.validateAllSheets = function() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var results = {
+      success: true,
+      sheets: [],
+      totalErrors: 0,
+      totalWarnings: 0,
+      summary: {
+        totalSheets: 0,
+        validSheets: 0,
+        invalidSheets: 0
+      }
+    };
+    
+    // Get all sheets
+    var sheets = ss.getSheets();
+    results.summary.totalSheets = sheets.length;
+    
+    for (var i = 0; i < sheets.length; i++) {
+      var sheet = sheets[i];
+      var sheetName = sheet.getName();
+      
+      // Skip system sheets
+      if (sheetName === 'Config' || sheetName === 'Configuration') {
+        continue;
+      }
+      
+      var sheetResult = {
+        name: sheetName,
+        valid: true,
+        errors: [],
+        warnings: [],
+        recordCount: 0
+      };
+      
+      try {
+        // Get data from sheet
+        var lastRow = sheet.getLastRow();
+        if (lastRow > 1) {
+          var data = sheet.getDataRange().getValues();
+          sheetResult.recordCount = lastRow - 1; // Exclude header
+          
+          // Basic validation - check for empty required columns
+          if (sheetName === 'Products') {
+            this.validateProductsSheet(data, sheetResult);
+          } else if (sheetName === 'Variants') {
+            this.validateVariantsSheet(data, sheetResult);
+          }
+        }
+        
+        if (sheetResult.errors.length > 0) {
+          sheetResult.valid = false;
+          results.success = false;
+          results.summary.invalidSheets++;
+        } else {
+          results.summary.validSheets++;
+        }
+        
+        results.totalErrors += sheetResult.errors.length;
+        results.totalWarnings += sheetResult.warnings.length;
+        
+      } catch (error) {
+        sheetResult.valid = false;
+        sheetResult.errors.push('Sheet validation error: ' + error.message);
+        results.success = false;
+        results.summary.invalidSheets++;
+      }
+      
+      results.sheets.push(sheetResult);
+    }
+    
+    return results;
+    
+  } catch (error) {
+    return {
+      success: false,
+      error: 'Validation failed: ' + error.message,
+      sheets: [],
+      totalErrors: 1,
+      totalWarnings: 0
+    };
+  }
+};
+
+/**
+ * Validate Products sheet data
+ */
+ValidationEngine.prototype.validateProductsSheet = function(data, result) {
+  if (data.length < 2) return; // No data rows
+  
+  var headers = data[0];
+  var requiredColumns = ['id', 'title', 'handle'];
+  
+  // Check for required columns
+  for (var i = 0; i < requiredColumns.length; i++) {
+    var col = requiredColumns[i];
+    if (headers.indexOf(col) === -1) {
+      result.errors.push('Missing required column: ' + col);
+    }
+  }
+  
+  // Check for duplicate IDs
+  var ids = [];
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var id = row[headers.indexOf('id')];
+    if (id && ids.indexOf(id) !== -1) {
+      result.errors.push('Duplicate product ID: ' + id + ' (row ' + (i + 1) + ')');
+    }
+    if (id) ids.push(id);
+  }
+};
+
+/**
+ * Validate Variants sheet data
+ */
+ValidationEngine.prototype.validateVariantsSheet = function(data, result) {
+  if (data.length < 2) return; // No data rows
+  
+  var headers = data[0];
+  var requiredColumns = ['id', 'product_id', 'title'];
+  
+  // Check for required columns
+  for (var i = 0; i < requiredColumns.length; i++) {
+    var col = requiredColumns[i];
+    if (headers.indexOf(col) === -1) {
+      result.errors.push('Missing required column: ' + col);
+    }
+  }
+  
+  // Check for duplicate IDs
+  var ids = [];
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var id = row[headers.indexOf('id')];
+    if (id && ids.indexOf(id) !== -1) {
+      result.errors.push('Duplicate variant ID: ' + id + ' (row ' + (i + 1) + ')');
+    }
+    if (id) ids.push(id);
+  }
+};
