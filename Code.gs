@@ -11,465 +11,271 @@ var CONFIG = {
   MAX_RETRIES: 3
 };
 
-// Menu français simplifié - Milestone 2
+/**
+ * Called when the spreadsheet is opened
+ * Delegates menu creation to UIManager
+ */
 function onOpen() {
   try {
-    var ui = SpreadsheetApp.getUi();
-    var menu = ui.createMenu('🛍️ Catalogue Shopify');
+    var uiManager = new UIManager();
+    uiManager.createCustomMenu();
     
-    // Actions principales
-    menu.addItem('📥 Importer (Produits+Variants)', 'importAllProducts');
-    menu.addItem('⚡ Mise à jour (modifications Produit/Variant)', 'incrementalAll');
-    menu.addItem('🧪 Vérifier avant import (Aperçu sécurisé)', 'dryRunAll');
-    
-    menu.addSeparator();
-    
-    // Imports spécialisés
-    menu.addSubMenu(ui.createMenu('🔧 Imports spécialisés')
-      .addItem('📦 Importer produits uniquement', 'importProducts')
-      .addItem('🔧 Importer variantes uniquement', 'importVariants')
-      .addItem('📋 Importer métachamps "Produit"', 'importProductMetafields')
-      .addItem('📋 Importer métachamps "Variant"', 'importVariantMetafields')
-      .addItem('🖼️ Importer images produits', 'importProductImages')
-      .addItem('📦 Importer stock et inventaire', 'importInventory'));
-
-    // Add export functionality (Milestone 3)
-    addExportMenuItems(menu);
-
-    menu.addSeparator();
-    
-    // Configuration
-    menu.addSubMenu(ui.createMenu('⚙️ Configuration')
-      .addItem('🔗 Tester la connexion Shopify', 'testConnection')
-      .addItem('📊 Statistiques des imports', 'viewImportStats')
-      .addItem('🔍 Diagnostiquer un problème', 'runDebugTest')
-      .addItem('⚙️ Paramètres de connexion', 'setupConfig'));
-    
-    menu.addToUi();
-    
-    Logger.log('Milestone 2 menu created successfully');
+    Logger.log('Shopify Sheets Catalog initialized successfully');
   } catch (error) {
-    Logger.log('Error creating menu: ' + error.message);
+    Logger.log('Error during onOpen initialization: ' + error.message);
   }
 }
 
-// Enhanced import all with options
+// Core import orchestration - called by UIManager
 function importAllProducts() {
   try {
-    var ui = SpreadsheetApp.getUi();
-    var response = ui.alert(
-      '📥 Import All Products & Variants',
-      'This will import all products and variants from Shopify.\\n\\n' +
-      'Estimated time: 15-20 seconds for ~100 records\\n\\n' +
-      'Continue with import?',
-      ui.ButtonSet.YES_NO
-    );
-    
-    if (response !== ui.Button.YES) {
-      return;
-    }
-    
-    ui.alert('🚀 Import Started', 'Import is running... Check the logs for progress.', ui.ButtonSet.OK);
-    
     var orchestrator = new ImportOrchestrator();
     var results = orchestrator.importAll();
-    
-    showImportResults('All Products & Variants', results);
-    
+    return results;
   } catch (error) {
     Logger.log('Import failed: ' + error.message);
-    SpreadsheetApp.getUi().alert('❌ Import Failed', error.message, SpreadsheetApp.getUi().ButtonSet.OK);
+    throw error;
   }
 }
 
-// NEW: Dry-run validation functions
+// Core dry-run validation functions - called by UIManager
 function dryRunProducts() {
   try {
-    var ui = SpreadsheetApp.getUi();
-    ui.alert('🧪 Starting Dry-Run Validation', 'Validating products without making changes...', ui.ButtonSet.OK);
-    
     var importer = new ProductImporter();
-    var results = importer.import({ dryRun: true });
-    
-    showDryRunResults('Products', results);
-    
+    return importer.import({ dryRun: true });
   } catch (error) {
     Logger.log('Dry-run failed: ' + error.message);
-    SpreadsheetApp.getUi().alert('❌ Validation Failed', error.message, SpreadsheetApp.getUi().ButtonSet.OK);
+    throw error;
   }
 }
 
 function dryRunVariants() {
   try {
-    var ui = SpreadsheetApp.getUi();
-    ui.alert('🧪 Starting Dry-Run Validation', 'Validating variants without making changes...', ui.ButtonSet.OK);
-    
     var importer = new VariantImporter();
-    var results = importer.import({ dryRun: true });
-    
-    showDryRunResults('Variants', results);
-    
+    return importer.import({ dryRun: true });
   } catch (error) {
     Logger.log('Dry-run failed: ' + error.message);
-    SpreadsheetApp.getUi().alert('❌ Validation Failed', error.message, SpreadsheetApp.getUi().ButtonSet.OK);
+    throw error;
   }
 }
 
 function dryRunAll() {
   try {
-    var ui = SpreadsheetApp.getUi();
-    ui.alert('🧪 Starting Complete Dry-Run', 'Validating all data without making changes...', ui.ButtonSet.OK);
-    
     Logger.log('DRY-RUN: Starting complete validation');
-    
     var orchestrator = new ImportOrchestrator();
     var results = orchestrator.importAll({ dryRun: true });
-    
     Logger.log('DRY-RUN: Results received: ' + JSON.stringify(results));
-    
-    showDryRunResults('All Data', results);
-    
+    return results;
   } catch (error) {
     Logger.log('Dry-run failed: ' + error.message);
     Logger.log('Error stack: ' + error.stack);
-    SpreadsheetApp.getUi().alert('❌ Validation Failed', error.message, SpreadsheetApp.getUi().ButtonSet.OK);
+    throw error;
   }
 }
 
-// NEW: Incremental import functions
+// Core incremental import functions - called by UIManager
 function incrementalProducts() {
   try {
-    var ui = SpreadsheetApp.getUi();
-    var response = ui.alert(
-      '⚡ Incremental Product Import',
-      'This will only import new or changed products.\\n\\n' +
-      'Much faster for regular updates!\\n\\n' +
-      'Continue?',
-      ui.ButtonSet.YES_NO
-    );
-    
-    if (response !== ui.Button.YES) {
-      return;
-    }
-    
-    ui.alert('⚡ Smart Import Started', 'Analyzing changes... This may take a moment.', ui.ButtonSet.OK);
-    
     var importer = new ProductImporter();
-    var results = importer.import({ incremental: true });
-    
-    showIncrementalResults('Products', results);
-    
+    return importer.import({ incremental: true });
   } catch (error) {
     Logger.log('Incremental import failed: ' + error.message);
-    SpreadsheetApp.getUi().alert('❌ Import Failed', error.message, SpreadsheetApp.getUi().ButtonSet.OK);
+    throw error;
   }
 }
 
 function incrementalVariants() {
   try {
-    var ui = SpreadsheetApp.getUi();
-    var response = ui.alert(
-      '⚡ Incremental Variant Import',
-      'This will only import new or changed variants.\\n\\n' +
-      'Much faster for regular updates!\\n\\n' +
-      'Continue?',
-      ui.ButtonSet.YES_NO
-    );
-    
-    if (response !== ui.Button.YES) {
-      return;
-    }
-    
-    ui.alert('⚡ Smart Import Started', 'Analyzing changes... This may take a moment.', ui.ButtonSet.OK);
-    
     var importer = new VariantImporter();
-    var results = importer.import({ incremental: true });
-    
-    showIncrementalResults('Variants', results);
-    
+    return importer.import({ incremental: true });
   } catch (error) {
     Logger.log('Incremental import failed: ' + error.message);
-    SpreadsheetApp.getUi().alert('❌ Import Failed', error.message, SpreadsheetApp.getUi().ButtonSet.OK);
+    throw error;
   }
 }
 
 function incrementalAll() {
   try {
-    var ui = SpreadsheetApp.getUi();
-    var response = ui.alert(
-      '⚡ Smart Import All',
-      'This will only import new or changed data.\\n\\n' +
-      'Perfect for regular updates!\\n\\n' +
-      'Continue?',
-      ui.ButtonSet.YES_NO
-    );
-    
-    if (response !== ui.Button.YES) {
-      return;
-    }
-    
-    ui.alert('⚡ Smart Import Started', 'Analyzing all changes... This may take a moment.', ui.ButtonSet.OK);
-    
     var orchestrator = new ImportOrchestrator();
-    var results = orchestrator.importAll({ incremental: true });
-    
-    showIncrementalResults('All Data', results);
-    
+    return orchestrator.importAll({ incremental: true });
   } catch (error) {
     Logger.log('Smart import failed: ' + error.message);
-    SpreadsheetApp.getUi().alert('❌ Import Failed', error.message, SpreadsheetApp.getUi().ButtonSet.OK);
+    throw error;
   }
 }
 
-// NEW: Enhanced result display functions
+// Result display functions - moved to UIManager, kept here for backward compatibility
 function showDryRunResults(type, results) {
-  var ui = SpreadsheetApp.getUi();
-  
-  if (results.success) {
-    var message = '🧪 DRY-RUN VALIDATION COMPLETE\\n\\n' +
-      '📊 ANALYSIS RESULTS:\\n' +
-      '• Records Analyzed: ' + results.recordsProcessed + '\\n';
-    
-    // Safe access to validation results
-    if (results.validationResults && results.validationResults.summary) {
-      message += '• Valid Records: ' + results.validationResults.summary.validRecords + '\\n' +
-        '• Invalid Records: ' + results.validationResults.summary.invalidRecords + '\\n' +
-        '• Records with Warnings: ' + results.validationResults.summary.recordsWithWarnings + '\\n';
-    } else {
-      message += '• Validation: Completed successfully\\n';
-    }
-    
-    message += '\\n⏱️ Analysis Time: ' + Math.round(results.duration / 1000) + ' seconds\\n' +
-      '🌐 API Calls: ' + (results.apiCallCount || 0) + '\\n' +
-      '⚡ Rate Limit Hits: ' + (results.rateLimitHits || 0) + '\\n\\n';
-    
-    // Safe access to validation errors
-    if (results.validationResults && results.validationResults.errors && results.validationResults.errors.length > 0) {
-      message += '❌ ERRORS FOUND:\\n' + results.validationResults.errors.slice(0, 5).join('\\n') + '\\n\\n';
-    }
-    
-    // Safe access to validation warnings
-    if (results.validationResults && results.validationResults.warnings && results.validationResults.warnings.length > 0) {
-      var warningTexts = [];
-      for (var i = 0; i < Math.min(5, results.validationResults.warnings.length); i++) {
-        var warning = results.validationResults.warnings[i];
-        if (warning.warnings && warning.warnings.length > 0) {
-          warningTexts.push('Record ' + warning.recordId + ': ' + warning.warnings.join(', '));
-        }
-      }
-      if (warningTexts.length > 0) {
-        message += '⚠️ WARNINGS:\n' + warningTexts.join('\n') + '\n\n';
-      }
-    }
-    
-    // Safe validation status check
-    if (results.validationResults && typeof results.validationResults.isValid !== 'undefined') {
-      message += results.validationResults.isValid ? 
-        '✅ READY FOR IMPORT!' : 
-        '❌ FIX ERRORS BEFORE IMPORTING';
-    } else {
-      message += '✅ DRY-RUN COMPLETED SUCCESSFULLY!';
-    }
-    
-    ui.alert('🧪 ' + type + ' Validation Results', message, ui.ButtonSet.OK);
-  } else {
-    var errorMessage = 'Validation failed';
-    if (results.errors && results.errors.length > 0) {
-      errorMessage = results.errors.join('\\n');
-    } else if (results.error) {
-      errorMessage = results.error;
-    }
-    ui.alert('❌ Validation Failed', errorMessage, ui.ButtonSet.OK);
-  }
+  var uiManager = new UIManager();
+  return uiManager.showResultsDialog('🧪 ' + type + ' Validation Results', results);
 }
 
 function showIncrementalResults(type, results) {
-  var ui = SpreadsheetApp.getUi();
-  
-  if (results.success) {
-    var message = '⚡ SMART IMPORT COMPLETE\\n\\n' +
-      '📊 IMPORT RESULTS:\\n' +
-      '• Total Records Processed: ' + results.recordsProcessed + '\\n' +
-      '• Records Actually Written: ' + results.recordsWritten + '\\n' +
-      '• Processing Action: ' + (results.processingAction === 'incremental_import' ? 'Incremental' : 'Full') + '\\n\\n' +
-      '⏱️ Import Time: ' + Math.round(results.duration / 1000) + ' seconds\\n' +
-      '🌐 API Calls: ' + results.apiCallCount + '\\n' +
-      '📈 Avg Rate: ' + results.avgRequestsPerSecond + ' req/sec\\n' +
-      '⚡ Rate Limit Hits: ' + results.rateLimitHits + '\\n\\n';
-    
-    if (results.warnings.length > 0) {
-      message += '⚠️ WARNINGS: ' + results.warnings.length + '\\n';
-    }
-    
-    message += '✅ Import completed successfully!';
-    
-    ui.alert('⚡ ' + type + ' Smart Import Results', message, ui.ButtonSet.OK);
-  } else {
-    ui.alert('❌ Import Failed', results.errors.join('\\n'), ui.ButtonSet.OK);
-  }
+  var uiManager = new UIManager();
+  return uiManager.showResultsDialog('⚡ ' + type + ' Smart Import Results', results);
 }
 
 function showImportResults(type, results) {
-  var ui = SpreadsheetApp.getUi();
-  
-  if (results.success) {
-    var message = '✅ IMPORT COMPLETE\\n\\n' +
-      '📊 RESULTS:\\n' +
-      '• Records Imported: ' + results.recordsProcessed + '\\n' +
-      '• Duration: ' + Math.round(results.duration / 1000) + ' seconds\\n\\n';
-    
-    if (results.warnings && results.warnings.length > 0) {
-      message += '⚠️ Warnings: ' + results.warnings.length + '\\n';
-    }
-    
-    message += '🎉 All data imported successfully!';
-    
-    ui.alert('📥 ' + type + ' Import Results', message, ui.ButtonSet.OK);
-  } else {
-    ui.alert('❌ Import Failed', results.errors.join('\\n'), ui.ButtonSet.OK);
-  }
+  var uiManager = new UIManager();
+  return uiManager.showResultsDialog('📥 ' + type + ' Import Results', results);
 }
 
-// NEW: Import statistics viewer
+// Core statistics gathering - called by UIManager
 function viewImportStats() {
   try {
-    var ui = SpreadsheetApp.getUi();
     var ss = SpreadsheetApp.getActiveSpreadsheet();
-    
-    var stats = '📊 IMPORT STATISTICS\\n\\n';
+    var stats = {
+      products: 0,
+      variants: 0,
+      configured: false
+    };
     
     // Check Products sheet
     var productsSheet = ss.getSheetByName('Products');
     if (productsSheet) {
-      var productCount = Math.max(0, productsSheet.getLastRow() - 1);
-      stats += '📦 Products: ' + productCount + ' records\\n';
+      stats.products = Math.max(0, productsSheet.getLastRow() - 1);
     }
     
     // Check Variants sheet
     var variantsSheet = ss.getSheetByName('Variants');
     if (variantsSheet) {
-      var variantCount = Math.max(0, variantsSheet.getLastRow() - 1);
-      stats += '🔧 Variants: ' + variantCount + ' records\\n';
+      stats.variants = Math.max(0, variantsSheet.getLastRow() - 1);
     }
     
     // Check Configuration
     var configSheet = ss.getSheetByName('Configuration');
     if (configSheet) {
-      stats += '⚙️ Configuration: Set up\\n';
+      stats.configured = true;
     }
     
-    stats += '\\n🎯 Ready for Milestone 2 features!';
-    
-    ui.alert('📊 Current Statistics', stats, ui.ButtonSet.OK);
-    
+    return stats;
   } catch (error) {
     Logger.log('Error getting stats: ' + error.message);
-    SpreadsheetApp.getUi().alert('❌ Error', 'Could not retrieve statistics: ' + error.message, SpreadsheetApp.getUi().ButtonSet.OK);
+    throw error;
   }
 }
 
-// Existing functions (maintained for compatibility)
-function importProducts() {
+// Core import functions - called by UIManager
+function importProductsOnly() {
   try {
-    var ui = SpreadsheetApp.getUi();
-    var response = ui.alert('Import Products', 'Import all products from Shopify?', ui.ButtonSet.YES_NO);
-    
-    if (response === ui.Button.YES) {
-      ui.alert('Import Started', 'Products import is running...', ui.ButtonSet.OK);
-      
-      var importer = new ProductImporter();
-      var results = importer.import();
-      
-      showImportResults('Products', results);
-    }
+    var importer = new ProductImporter();
+    return importer.import();
   } catch (error) {
     Logger.log('Product import failed: ' + error.message);
-    SpreadsheetApp.getUi().alert('Import Failed', error.message, SpreadsheetApp.getUi().ButtonSet.OK);
+    throw error;
   }
 }
 
-function importVariants() {
+function importVariantsOnly() {
   try {
-    var ui = SpreadsheetApp.getUi();
-    var response = ui.alert('Import Variants', 'Import all variants from Shopify?', ui.ButtonSet.YES_NO);
-    
-    if (response === ui.Button.YES) {
-      ui.alert('Import Started', 'Variants import is running...', ui.ButtonSet.OK);
-      
-      var importer = new VariantImporter();
-      var results = importer.import();
-      
-      showImportResults('Variants', results);
-    }
+    var importer = new VariantImporter();
+    return importer.import();
   } catch (error) {
     Logger.log('Variant import failed: ' + error.message);
-    SpreadsheetApp.getUi().alert('Import Failed', error.message, SpreadsheetApp.getUi().ButtonSet.OK);
+    throw error;
   }
 }
 
+// Core configuration functions - called by UIManager
 function setupConfig() {
   try {
     var configManager = new ConfigManager();
     configManager.initializeConfigSheet();
-    
-    SpreadsheetApp.getUi().alert(
-      'Configuration Setup',
-      'Configuration sheet created! Please fill in your Shopify store details in the Configuration tab.',
-      SpreadsheetApp.getUi().ButtonSet.OK
-    );
+    return { success: true, message: 'Configuration sheet created successfully!' };
   } catch (error) {
     Logger.log('Config setup failed: ' + error.message);
-    SpreadsheetApp.getUi().alert('Setup Failed', error.message, SpreadsheetApp.getUi().ButtonSet.OK);
+    throw error;
   }
 }
 
-function testConnection() {
+function testShopifyConnection() {
   try {
     var apiClient = new ApiClient();
     var isConnected = apiClient.testConnection();
-    
-    if (isConnected) {
-      SpreadsheetApp.getUi().alert('✅ Connection Successful', 'Successfully connected to Shopify API!', SpreadsheetApp.getUi().ButtonSet.OK);
-    } else {
-      SpreadsheetApp.getUi().alert('❌ Connection Failed', 'Could not connect to Shopify API. Please check your configuration.', SpreadsheetApp.getUi().ButtonSet.OK);
-    }
+    return { 
+      success: isConnected, 
+      message: isConnected ? 'Successfully connected to Shopify API!' : 'Could not connect to Shopify API. Please check your configuration.'
+    };
   } catch (error) {
     Logger.log('Connection test failed: ' + error.message);
-    SpreadsheetApp.getUi().alert('Connection Test Failed', error.message, SpreadsheetApp.getUi().ButtonSet.OK);
+    throw error;
   }
 }
 
-// ===== NOUVELLES FONCTIONS POUR MENU FRANÇAIS =====
-
-// Fonctions futures - Milestone 3
-function importProductMetafields() {
-  var ui = SpreadsheetApp.getUi();
-  ui.alert('🚧 Fonctionnalité à venir', 
-    'L\'import des métachamps produits sera disponible dans Milestone 3.\n\n' +
-    'Cette fonction permettra d\'importer tous les champs personnalisés de vos produits.', 
-    ui.ButtonSet.OK);
+// Future functionality placeholders - called by UIManager
+function importMetafields() {
+  throw new Error('Metafields import will be available in Milestone 3');
 }
 
-function importVariantMetafields() {
-  var ui = SpreadsheetApp.getUi();
-  ui.alert('🚧 Fonctionnalité à venir', 
-    'L\'import des métachamps variantes sera disponible dans Milestone 3.\n\n' +
-    'Cette fonction permettra d\'importer tous les champs personnalisés de vos variantes.', 
-    ui.ButtonSet.OK);
-}
-
-function importProductImages() {
-  var ui = SpreadsheetApp.getUi();
-  ui.alert('🚧 Fonctionnalité à venir', 
-    'L\'import des images produits sera disponible dans Milestone 3.\n\n' +
-    'Cette fonction permettra de gérer toutes les images de vos produits.', 
-    ui.ButtonSet.OK);
+function importImages() {
+  throw new Error('Images import will be available in Milestone 3');
 }
 
 function importInventory() {
-  var ui = SpreadsheetApp.getUi();
-  ui.alert('🚧 Fonctionnalité à venir', 
-    'L\'import du stock et inventaire sera disponible dans Milestone 3.\n\n' +
-    'Cette fonction permettra de gérer les niveaux de stock par localisation.', 
-    ui.ButtonSet.OK);
+  throw new Error('Inventory import will be available in Milestone 3');
+}
+
+// Validation functions - called by UIManager
+function runDryRun() {
+  return dryRunAll();
+}
+
+function validateAllData() {
+  try {
+    var validator = new ValidationEngine();
+    return validator.validateAllSheets();
+  } catch (error) {
+    Logger.log('Validation failed: ' + error.message);
+    throw error;
+  }
+}
+
+function checkDuplicates() {
+  throw new Error('Duplicate check is not yet implemented');
+}
+
+function recomputeHashes() {
+  throw new Error('Hash recomputation is not yet implemented');
+}
+
+// Tool functions - called by UIManager
+function createManualBackup() {
+  throw new Error('Manual backup is not yet implemented');
+}
+
+function showRestoreDialog() {
+  throw new Error('Restore functionality is not yet implemented');
+}
+
+function clearLogs() {
+  try {
+    console.clear();
+    return { success: true, message: 'Application logs have been cleared' };
+  } catch (error) {
+    Logger.log('Clear logs error: ' + error.message);
+    throw error;
+  }
+}
+
+function toggleReadOnlyMode() {
+  throw new Error('Read-only mode toggle is not yet implemented');
+}
+
+function refreshConfig() {
+  try {
+    var configManager = new ConfigManager();
+    configManager.refresh();
+    return { success: true, message: 'Configuration has been reloaded successfully' };
+  } catch (error) {
+    Logger.log('Refresh config error: ' + error.message);
+    throw error;
+  }
+}
+
+function openUserGuide() {
+  throw new Error('User guide is not yet implemented');
+}
+
+function openSettings() {
+  throw new Error('Settings dialog is not yet implemented');
 }
