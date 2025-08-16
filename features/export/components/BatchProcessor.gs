@@ -72,29 +72,34 @@ BatchProcessor.prototype.processAllBatches = function(data, operation, options) 
 
 /**
  * Process data using bulk operations for maximum performance
+ * MILESTONE 3: Enhanced with dedicated export operations
  */
 BatchProcessor.prototype.processBulkOperations = function(data, operation, options) {
-  Logger.log(`🚀 [BatchProcessor] Using bulk operations for ${operation}`);
+  Logger.log(`🚀 [BatchProcessor] Using ENHANCED bulk operations for ${operation}`);
   
   try {
     var bulkOptions = {
       batchSize: options.batchSize || 100,
       validateBeforeExport: options.validateBeforeExport !== false,
-      dryRun: options.dryRun || false
+      dryRun: options.dryRun || false,
+      performanceMonitoring: options.performanceMonitoring || false
     };
     
-    var bulkResult = this.bulkClient.bulkExportProducts(data, bulkOptions);
+    // MILESTONE 3: Use dedicated bulk export operations
+    var bulkResult = this.processBulkExportOperations(data, operation, bulkOptions);
     
-    // Update processing stats
-    this.processingStats.processedItems = bulkResult.success;
-    this.processingStats.failedItems = bulkResult.failed;
+    // Update processing stats with enhanced metrics
+    this.processingStats.processedItems = bulkResult.success || 0;
+    this.processingStats.failedItems = bulkResult.failed || 0;
     this.processingStats.endTime = new Date();
+    this.processingStats.bulkOperationsUsed = (this.processingStats.bulkOperationsUsed || 0) + 1;
     
-    Logger.log(`✅ [BatchProcessor] Bulk operation completed: ${bulkResult.success} success, ${bulkResult.failed} failed in ${bulkResult.timeSeconds.toFixed(1)}s`);
+    Logger.log(`✅ [BatchProcessor] Enhanced bulk operation completed: ${bulkResult.success} success, ${bulkResult.failed} failed in ${bulkResult.timeSeconds.toFixed(1)}s`);
     
     return {
       success: bulkResult.success > 0 || bulkResult.failed === 0,
       bulkOperation: true,
+      enhancedBulkOperation: true, // MILESTONE 3 indicator
       processedItems: bulkResult.success,
       failedItems: bulkResult.failed,
       skippedItems: bulkResult.skipped,
@@ -102,11 +107,12 @@ BatchProcessor.prototype.processBulkOperations = function(data, operation, optio
       errors: bulkResult.errors,
       timeSeconds: bulkResult.timeSeconds,
       ratePerSecond: bulkResult.ratePerSecond,
+      bulkOperationsUsed: 1,
       stats: this.processingStats
     };
     
   } catch (error) {
-    Logger.log(`❌ [BatchProcessor] Bulk operation failed: ${error.message}. Falling back to individual processing.`);
+    Logger.log(`❌ [BatchProcessor] Enhanced bulk operation failed: ${error.message}. Falling back to individual processing.`);
     
     // Fallback to individual processing
     var batches = this.createBatches(data, options.batchSize);
@@ -791,6 +797,205 @@ BatchProcessor.prototype.generateProcessingSummary = function() {
       (this.processingStats.processedItems / this.processingStats.totalItems) * 100 : 0,
     duration: duration,
     itemsPerSecond: duration > 0 ? 
-      (this.processingStats.processedItems / (duration / 1000)) : 0
+      (this.processingStats.processedItems / (duration / 1000)) : 0,
+    bulkOperationsUsed: this.processingStats.bulkOperationsUsed || 0
   };
+};
+
+// ===== MILESTONE 3: DEDICATED BULK EXPORT OPERATIONS =====
+
+/**
+ * Process bulk export operations with enhanced performance
+ * @param {Array} data - Data to export
+ * @param {string} operation - Operation type
+ * @param {Object} options - Processing options
+ */
+BatchProcessor.prototype.processBulkExportOperations = function(data, operation, options) {
+  Logger.log(`[BatchProcessor] 🚀 Processing ${data.length} items with dedicated bulk export operations`);
+  
+  var startTime = new Date();
+  var results = {
+    success: 0,
+    failed: 0,
+    skipped: 0,
+    details: [],
+    errors: [],
+    timeSeconds: 0,
+    ratePerSecond: 0
+  };
+  
+  try {
+    // Group data by operation type for optimal bulk processing
+    var groupedData = this.groupDataByOperation(data, operation);
+    
+    // Process each group with appropriate bulk method
+    for (var opType in groupedData) {
+      if (groupedData[opType].length > 0) {
+        Logger.log(`[BatchProcessor] Processing ${groupedData[opType].length} ${opType} operations`);
+        
+        var groupResult = this.processBulkOperationGroup(groupedData[opType], opType, options);
+        
+        results.success += groupResult.success || 0;
+        results.failed += groupResult.failed || 0;
+        results.skipped += groupResult.skipped || 0;
+        results.details = results.details.concat(groupResult.details || []);
+        results.errors = results.errors.concat(groupResult.errors || []);
+      }
+    }
+    
+    var endTime = new Date();
+    results.timeSeconds = (endTime - startTime) / 1000;
+    results.ratePerSecond = results.timeSeconds > 0 ? 
+      Math.round((results.success / results.timeSeconds) * 100) / 100 : 0;
+    
+    Logger.log(`[BatchProcessor] ✅ Bulk export completed: ${results.success} success, ${results.failed} failed, ${results.skipped} skipped in ${results.timeSeconds.toFixed(1)}s`);
+    
+    return results;
+    
+  } catch (error) {
+    Logger.log(`[BatchProcessor] ❌ Error in bulk export operations: ${error.message}`);
+    results.errors.push(error.message);
+    results.timeSeconds = (new Date() - startTime) / 1000;
+    return results;
+  }
+};
+
+/**
+ * Group data by operation type for optimal bulk processing
+ * @param {Array} data - Data to process
+ * @param {string} defaultOperation - Default operation if not specified
+ */
+BatchProcessor.prototype.groupDataByOperation = function(data, defaultOperation) {
+  var grouped = {
+    create: [],
+    update: [],
+    delete: []
+  };
+  
+  for (var i = 0; i < data.length; i++) {
+    var item = data[i];
+    var operation = item.operation || defaultOperation || 'update';
+    
+    // Determine operation if mixed
+    if (operation === 'mixed') {
+      var record = item.record || item;
+      if (record.id && record.id !== '') {
+        operation = 'update';
+      } else {
+        operation = 'create';
+      }
+    }
+    
+    if (grouped[operation]) {
+      grouped[operation].push(item);
+    } else {
+      // Default to update for unknown operations
+      grouped.update.push(item);
+    }
+  }
+  
+  Logger.log(`[BatchProcessor] Grouped operations: ${grouped.create.length} creates, ${grouped.update.length} updates, ${grouped.delete.length} deletes`);
+  
+  return grouped;
+};
+
+/**
+ * Process a group of items with the same operation using bulk API
+ * @param {Array} items - Items to process
+ * @param {string} operation - Operation type
+ * @param {Object} options - Processing options
+ */
+BatchProcessor.prototype.processBulkOperationGroup = function(items, operation, options) {
+  var results = {
+    success: 0,
+    failed: 0,
+    skipped: 0,
+    details: [],
+    errors: []
+  };
+  
+  try {
+    // Determine resource type from first item
+    var resourceType = items.length > 0 ? 
+      this.determineResourceType(items[0].record || items[0]) : 'products';
+    
+    Logger.log(`[BatchProcessor] Processing ${items.length} ${resourceType} ${operation} operations`);
+    
+    // Use BulkApiClient for the operation
+    var bulkResult;
+    switch (operation) {
+      case 'create':
+        bulkResult = this.bulkApiClient.bulkCreateResources(items, resourceType, options);
+        break;
+      case 'update':
+        bulkResult = this.bulkApiClient.bulkUpdateResources(items, resourceType, options);
+        break;
+      case 'delete':
+        bulkResult = this.bulkApiClient.bulkDeleteResources(items, resourceType, options);
+        break;
+      default:
+        throw new Error('Unsupported bulk operation: ' + operation);
+    }
+    
+    if (bulkResult && bulkResult.success) {
+      results.success = bulkResult.processedCount || 0;
+      results.failed = bulkResult.failedCount || 0;
+      results.skipped = bulkResult.skippedCount || 0;
+      results.details = bulkResult.details || [];
+      
+      Logger.log(`[BatchProcessor] ✅ Bulk ${operation} completed: ${results.success} success, ${results.failed} failed`);
+    } else {
+      // Fallback to individual processing
+      Logger.log(`[BatchProcessor] ⚠️ Bulk ${operation} failed, falling back to individual processing`);
+      var fallbackResult = this.processFallbackIndividual(items, operation, options);
+      
+      results.success = fallbackResult.success || 0;
+      results.failed = fallbackResult.failed || 0;
+      results.errors = fallbackResult.errors || [];
+    }
+    
+  } catch (error) {
+    Logger.log(`[BatchProcessor] ❌ Error processing ${operation} group: ${error.message}`);
+    results.errors.push(`${operation} group error: ${error.message}`);
+    
+    // Fallback to individual processing
+    var fallbackResult = this.processFallbackIndividual(items, operation, options);
+    results.success = fallbackResult.success || 0;
+    results.failed = fallbackResult.failed || 0;
+  }
+  
+  return results;
+};
+
+/**
+ * Fallback to individual processing when bulk operations fail
+ * @param {Array} items - Items to process individually
+ * @param {string} operation - Operation type
+ * @param {Object} options - Processing options
+ */
+BatchProcessor.prototype.processFallbackIndividual = function(items, operation, options) {
+  var results = { success: 0, failed: 0, errors: [] };
+  
+  Logger.log(`[BatchProcessor] 🔄 Processing ${items.length} items individually as fallback`);
+  
+  for (var i = 0; i < items.length; i++) {
+    try {
+      var itemResult = this.processItem(items[i], operation, options);
+      
+      if (itemResult.success) {
+        results.success++;
+      } else {
+        results.failed++;
+        results.errors.push(itemResult.error || 'Unknown error');
+      }
+      
+    } catch (error) {
+      results.failed++;
+      results.errors.push(error.message);
+    }
+  }
+  
+  Logger.log(`[BatchProcessor] Fallback processing completed: ${results.success} success, ${results.failed} failed`);
+  
+  return results;
 };

@@ -25,13 +25,17 @@ ExportQueue.prototype.initialize = function(sessionId) {
 };
 
 /**
- * Add items to the export queue
+ * Add items to the export queue with priority support
  * @param {Array} items - Items to add to queue
+ * @param {Object} options - Options including priority settings
  */
-ExportQueue.prototype.addItems = function(items) {
+ExportQueue.prototype.addItems = function(items, options) {
   if (!Array.isArray(items)) {
     items = [items];
   }
+  
+  options = options || {};
+  var defaultPriority = options.priority || 'normal';
   
   for (var i = 0; i < items.length; i++) {
     var item = items[i];
@@ -39,19 +43,29 @@ ExportQueue.prototype.addItems = function(items) {
     item.addedAt = new Date().toISOString();
     item.queueIndex = this.queue.length;
     
+    // MILESTONE 3: Add priority support
+    item.priority = item.priority || defaultPriority;
+    item.priorityScore = this.calculatePriorityScore(item);
+    
     this.queue.push(item);
   }
+  
+  // Sort queue by priority after adding items
+  this.sortQueueByPriority();
   
   this.updateStats();
   this.saveQueue();
   
-  Logger.log(`[ExportQueue] Added ${items.length} items to queue (total: ${this.queue.length})`);
+  Logger.log(`[ExportQueue] Added ${items.length} items to queue with priority '${defaultPriority}' (total: ${this.queue.length})`);
 };
 
 /**
- * Get next pending item from queue
+ * Get next pending item from queue (priority-aware)
  */
 ExportQueue.prototype.getNextItem = function() {
+  // Sort queue by priority before getting next item
+  this.sortQueueByPriority();
+  
   for (var i = 0; i < this.queue.length; i++) {
     if (this.queue[i].status === 'pending') {
       return {
@@ -572,4 +586,220 @@ ExportQueue.prototype.getSheetNameFromQueue = function() {
     Logger.log(`[ExportQueue] Error getting sheet name: ${error.message}`);
     return 'Variants';
   }
+};
+
+// ===== MILESTONE 3: PRIORITY-BASED QUEUE MANAGEMENT =====
+
+/**
+ * Calculate priority score for queue item
+ * @param {Object} item - Queue item
+ */
+ExportQueue.prototype.calculatePriorityScore = function(item) {
+  var score = 0;
+  
+  // Base priority scores
+  switch (item.priority) {
+    case 'critical':
+      score += 1000;
+      break;
+    case 'high':
+      score += 500;
+      break;
+    case 'normal':
+      score += 100;
+      break;
+    case 'low':
+      score += 10;
+      break;
+    default:
+      score += 100; // Default to normal
+  }
+  
+  // Operation type modifiers
+  switch (item.operation) {
+    case 'create':
+      score += 50; // New items get slight priority
+      break;
+    case 'update':
+      score += 25; // Updates are standard
+      break;
+    case 'delete':
+      score += 75; // Deletions get higher priority
+      break;
+  }
+  
+  // Time-based decay (older items get slightly higher priority)
+  if (item.addedAt) {
+    var ageMinutes = (new Date() - new Date(item.addedAt)) / (1000 * 60);
+    score += Math.min(ageMinutes * 0.1, 50); // Max 50 points for age
+  }
+  
+  return Math.round(score);
+};
+
+/**
+ * Sort queue by priority score (highest first)
+ */
+ExportQueue.prototype.sortQueueByPriority = function() {
+  try {
+    // Only sort pending items to preserve processing order
+    var pendingItems = [];
+    var nonPendingItems = [];
+    
+    for (var i = 0; i < this.queue.length; i++) {
+      if (this.queue[i].status === 'pending') {
+        pendingItems.push(this.queue[i]);
+      } else {
+        nonPendingItems.push(this.queue[i]);
+      }
+    }
+    
+    // Sort pending items by priority score (descending)
+    pendingItems.sort(function(a, b) {
+      var scoreA = a.priorityScore || 0;
+      var scoreB = b.priorityScore || 0;
+      return scoreB - scoreA; // Higher scores first
+    });
+    
+    // Recalculate queue indices
+    var sortedQueue = pendingItems.concat(nonPendingItems);
+    for (var j = 0; j < sortedQueue.length; j++) {
+      sortedQueue[j].queueIndex = j;
+    }
+    
+    this.queue = sortedQueue;
+    
+    Logger.log(`[ExportQueue] Queue sorted by priority: ${pendingItems.length} pending items reordered`);
+    
+  } catch (error) {
+    Logger.log(`[ExportQueue] Error sorting queue by priority: ${error.message}`);
+  }
+};
+
+/**
+ * Set item priority and resort queue
+ * @param {number} itemIndex - Index of item to update
+ * @param {string} priority - New priority (critical, high, normal, low)
+ */
+ExportQueue.prototype.setItemPriority = function(itemIndex, priority) {
+  if (itemIndex < 0 || itemIndex >= this.queue.length) {
+    Logger.log(`[ExportQueue] Invalid item index for priority update: ${itemIndex}`);
+    return false;
+  }
+  
+  try {
+    var item = this.queue[itemIndex];
+    var oldPriority = item.priority || 'normal';
+    
+    item.priority = priority;
+    item.priorityScore = this.calculatePriorityScore(item);
+    item.lastUpdated = new Date().toISOString();
+    
+    // Resort queue if item is still pending
+    if (item.status === 'pending') {
+      this.sortQueueByPriority();
+    }
+    
+    this.saveQueue();
+    
+    Logger.log(`[ExportQueue] Updated item ${itemIndex} priority: ${oldPriority} → ${priority} (score: ${item.priorityScore})`);
+    return true;
+    
+  } catch (error) {
+    Logger.log(`[ExportQueue] Error setting item priority: ${error.message}`);
+    return false;
+  }
+};
+
+/**
+ * Get items by priority level
+ * @param {string} priority - Priority level to filter by
+ */
+ExportQueue.prototype.getItemsByPriority = function(priority) {
+  var items = [];
+  for (var i = 0; i < this.queue.length; i++) {
+    if (this.queue[i].priority === priority) {
+      items.push({
+        item: this.queue[i],
+        index: i
+      });
+    }
+  }
+  return items;
+};
+
+/**
+ * Get priority statistics
+ */
+ExportQueue.prototype.getPriorityStats = function() {
+  var stats = {
+    critical: { total: 0, pending: 0, completed: 0, failed: 0 },
+    high: { total: 0, pending: 0, completed: 0, failed: 0 },
+    normal: { total: 0, pending: 0, completed: 0, failed: 0 },
+    low: { total: 0, pending: 0, completed: 0, failed: 0 }
+  };
+  
+  for (var i = 0; i < this.queue.length; i++) {
+    var item = this.queue[i];
+    var priority = item.priority || 'normal';
+    var status = item.status || 'pending';
+    
+    if (stats[priority]) {
+      stats[priority].total++;
+      if (stats[priority][status] !== undefined) {
+        stats[priority][status]++;
+      }
+    }
+  }
+  
+  return stats;
+};
+
+/**
+ * Promote items based on age (aging mechanism)
+ */
+ExportQueue.prototype.promoteAgedItems = function() {
+  var promotedCount = 0;
+  var currentTime = new Date();
+  
+  for (var i = 0; i < this.queue.length; i++) {
+    var item = this.queue[i];
+    
+    if (item.status === 'pending' && item.addedAt) {
+      var ageMinutes = (currentTime - new Date(item.addedAt)) / (1000 * 60);
+      var currentPriority = item.priority || 'normal';
+      
+      // Promote items that have been waiting too long
+      var shouldPromote = false;
+      var newPriority = currentPriority;
+      
+      if (ageMinutes > 30 && currentPriority === 'low') {
+        newPriority = 'normal';
+        shouldPromote = true;
+      } else if (ageMinutes > 60 && currentPriority === 'normal') {
+        newPriority = 'high';
+        shouldPromote = true;
+      } else if (ageMinutes > 120 && currentPriority === 'high') {
+        newPriority = 'critical';
+        shouldPromote = true;
+      }
+      
+      if (shouldPromote) {
+        item.priority = newPriority;
+        item.priorityScore = this.calculatePriorityScore(item);
+        item.lastUpdated = new Date().toISOString();
+        promotedCount++;
+        
+        Logger.log(`[ExportQueue] Promoted item ${i} from ${currentPriority} to ${newPriority} (age: ${Math.round(ageMinutes)}min)`);
+      }
+    }
+  }
+  
+  if (promotedCount > 0) {
+    this.sortQueueByPriority();
+    this.saveQueue();
+    Logger.log(`[ExportQueue] Promoted ${promotedCount} aged items`);
+  }
+  
+  return promotedCount;
 };

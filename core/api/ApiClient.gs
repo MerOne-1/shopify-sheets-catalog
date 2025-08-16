@@ -37,7 +37,7 @@ class ApiClient {
     // Rate limiting - ensure minimum delay between requests
     var now = Date.now();
     var timeSinceLastRequest = now - this.lastRequestTime;
-    var rateLimit = parseInt(this.configManager.getConfigValue('rate_limit_delay')) || CONFIG.RATE_LIMIT_DELAY;
+    var rateLimit = parseInt(this.configManager.getConfigValue('rate_limit_delay')) || 100;
     if (timeSinceLastRequest < rateLimit) {
       Utilities.sleep(rateLimit - timeSinceLastRequest);
     }
@@ -62,7 +62,7 @@ class ApiClient {
         var retryAfter = parseInt(response.getHeaders()['Retry-After']) || 2;
         Logger.log(`Rate limited. Waiting ${retryAfter} seconds...`);
         Utilities.sleep(retryAfter * 1000);
-        if (retryCount < CONFIG.MAX_RETRIES) {
+        if (retryCount < (parseInt(this.configManager.getConfigValue('max_retries')) || 3)) {
           return this.makeRequest(endpoint, method, payload, retryCount + 1);
         } else {
           throw new Error('Max retries exceeded for rate limiting');
@@ -77,8 +77,9 @@ class ApiClient {
     } catch (error) {
       Logger.log(`Request failed: ${error.message}`);
       // Retry on network errors
-      if (retryCount < CONFIG.MAX_RETRIES && error.message.includes('network')) {
-        Logger.log(`Retrying... (${retryCount + 1}/${CONFIG.MAX_RETRIES})`);
+      var maxRetries = parseInt(this.configManager.getConfigValue('max_retries')) || 3;
+      if (retryCount < maxRetries && error.message.includes('network')) {
+        Logger.log(`Retrying... (${retryCount + 1}/${maxRetries})`);
         Utilities.sleep(1000 * (retryCount + 1)); // Exponential backoff
         return this.makeRequest(endpoint, method, payload, retryCount + 1);
       }
@@ -278,7 +279,7 @@ class ApiClient {
    * Batch operations helper
    */
   processBatch(operations, batchSize = null) {
-    var maxBatchSize = batchSize || parseInt(this.configManager.getConfigValue('max_batch_size')) || CONFIG.MAX_BATCH_SIZE;
+    var maxBatchSize = batchSize || parseInt(this.configManager.getConfigValue('max_batch_size')) || 100;
     var results = [];
     for (var i = 0; i < operations.length; i += maxBatchSize) {
       var batch = operations.slice(i, i + maxBatchSize);

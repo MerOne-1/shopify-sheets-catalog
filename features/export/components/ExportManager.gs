@@ -14,6 +14,16 @@ function ExportManager() {
   
   // MILESTONE 2: Add intelligent caching for 92% improvement
   this.intelligentCache = new IntelligentCache();
+  
+  // MILESTONE 3: Add bulk export operations and performance monitoring
+  this.bulkApiClient = new BulkApiClient();
+  this.performanceMonitor = {
+    startTime: null,
+    endTime: null,
+    metrics: {},
+    apiCallCount: 0,
+    bulkOperationsUsed: 0
+  };
 }
 
 /**
@@ -568,4 +578,225 @@ ExportManager.prototype.hasDataChanged = function(sheetName, currentData) {
  */
 ExportManager.prototype.getExportState = function(sessionId) {
   return this.loadExportState(sessionId);
+};
+
+// ===== MILESTONE 3: BULK EXPORT OPERATIONS =====
+
+/**
+ * Initiate bulk export with enhanced performance monitoring
+ * @param {string} sheetName - Name of sheet to export
+ * @param {Object} options - Export options with bulk settings
+ */
+ExportManager.prototype.initiateBulkExport = function(sheetName, options) {
+  options = options || {};
+  options.useBulkOperations = options.useBulkOperations !== false; // Default to true
+  
+  // Initialize performance monitoring
+  this.performanceMonitor.startTime = new Date();
+  this.performanceMonitor.metrics = {
+    sheetName: sheetName,
+    bulkEnabled: options.useBulkOperations,
+    changeDetectionTime: 0,
+    validationTime: 0,
+    queueCreationTime: 0,
+    totalTime: 0
+  };
+  
+  try {
+    Logger.log(`[ExportManager] 🚀 Starting BULK export for ${sheetName} (Session: ${this.sessionId})`);
+    
+    var changeDetectionStart = new Date();
+    var result = this.initiateExport(sheetName, options);
+    var changeDetectionEnd = new Date();
+    
+    this.performanceMonitor.metrics.changeDetectionTime = changeDetectionEnd - changeDetectionStart;
+    
+    if (result.success && options.useBulkOperations) {
+      result.bulkOptimized = true;
+      result.performanceMetrics = this.getPerformanceMetrics();
+      Logger.log(`[ExportManager] ✅ Bulk export initiated successfully with performance monitoring`);
+    }
+    
+    return result;
+    
+  } catch (error) {
+    Logger.log(`[ExportManager] ❌ Error in bulk export: ${error.message}`);
+    return {
+      success: false,
+      error: 'Bulk export failed: ' + error.message,
+      sessionId: this.sessionId,
+      performanceMetrics: this.getPerformanceMetrics()
+    };
+  }
+};
+
+/**
+ * Process bulk export queue with enhanced performance tracking
+ * @param {Object} options - Processing options
+ */
+ExportManager.prototype.processBulkExportQueue = function(options) {
+  options = options || {};
+  options.useBulkOperations = options.useBulkOperations !== false;
+  
+  if (!this.exportQueue) {
+    return {
+      success: false,
+      error: 'Export queue not initialized. Call initiateBulkExport first.'
+    };
+  }
+  
+  try {
+    Logger.log(`[ExportManager] 🔄 Processing bulk export queue with enhanced performance tracking`);
+    
+    var processingStart = new Date();
+    
+    // Enhanced bulk processing with performance monitoring
+    var result = this.exportQueue.processQueue({
+      batchProcessor: this.batchProcessor,
+      retryManager: this.retryManager,
+      auditLogger: this.auditLogger,
+      bulkApiClient: this.bulkApiClient // Pass bulk client for enhanced operations
+    }, {
+      ...options,
+      onProgress: this.createBulkProgressCallback(),
+      performanceMonitoring: true
+    });
+    
+    var processingEnd = new Date();
+    this.performanceMonitor.metrics.processingTime = processingEnd - processingStart;
+    this.performanceMonitor.endTime = new Date();
+    
+    // Calculate total performance improvement
+    var performanceImprovement = this.calculateBulkPerformanceImprovement(result);
+    
+    if (result.success) {
+      Logger.log(`[ExportManager] ✅ Bulk export queue processed successfully`);
+      Logger.log(`[ExportManager] 📊 Performance improvement: ${performanceImprovement.percentageImprovement}%`);
+      
+      result.bulkOptimized = true;
+      result.performanceImprovement = performanceImprovement;
+      result.performanceMetrics = this.getPerformanceMetrics();
+    }
+    
+    return result;
+    
+  } catch (error) {
+    Logger.log(`[ExportManager] ❌ Error processing bulk export queue: ${error.message}`);
+    return {
+      success: false,
+      error: 'Bulk export queue processing failed: ' + error.message,
+      sessionId: this.sessionId,
+      performanceMetrics: this.getPerformanceMetrics()
+    };
+  }
+};
+
+/**
+ * Create progress callback for bulk operations with performance tracking
+ */
+ExportManager.prototype.createBulkProgressCallback = function() {
+  var self = this;
+  
+  return function(current, total, stats) {
+    // Track bulk operations usage
+    if (stats && stats.bulkOperationsUsed) {
+      self.performanceMonitor.bulkOperationsUsed += stats.bulkOperationsUsed;
+    }
+    
+    if (stats && stats.apiCallCount) {
+      self.performanceMonitor.apiCallCount += stats.apiCallCount;
+    }
+    
+    // Update progress with performance metrics
+    self.trackProgress(current, total);
+    
+    // Log performance metrics periodically
+    if (current % 5 === 0 || current === total) {
+      var currentMetrics = self.getPerformanceMetrics();
+      Logger.log(`[ExportManager] 📊 Progress: ${current}/${total} | API calls: ${currentMetrics.apiCallCount} | Bulk ops: ${currentMetrics.bulkOperationsUsed}`);
+    }
+  };
+};
+
+/**
+ * Calculate bulk export performance improvement
+ * @param {Object} result - Export processing result
+ */
+ExportManager.prototype.calculateBulkPerformanceImprovement = function(result) {
+  try {
+    var totalTime = this.performanceMonitor.endTime - this.performanceMonitor.startTime;
+    var itemsProcessed = (result.summary && result.summary.stats.completed) || 0;
+    var bulkOpsUsed = this.performanceMonitor.bulkOperationsUsed;
+    var totalApiCalls = this.performanceMonitor.apiCallCount;
+    
+    // Estimate time without bulk operations (assuming 1 API call per item)
+    var estimatedIndividualTime = itemsProcessed * 1500; // 1.5s per individual API call
+    var actualTime = totalTime;
+    
+    var timeSaved = Math.max(0, estimatedIndividualTime - actualTime);
+    var percentageImprovement = estimatedIndividualTime > 0 ? 
+      Math.round((timeSaved / estimatedIndividualTime) * 100) : 0;
+    
+    // Calculate API call efficiency
+    var expectedApiCalls = itemsProcessed; // Without bulk operations
+    var actualApiCalls = totalApiCalls;
+    var apiCallReduction = expectedApiCalls > 0 ? 
+      Math.round(((expectedApiCalls - actualApiCalls) / expectedApiCalls) * 100) : 0;
+    
+    return {
+      itemsProcessed: itemsProcessed,
+      totalTimeMs: totalTime,
+      estimatedIndividualTimeMs: estimatedIndividualTime,
+      timeSavedMs: timeSaved,
+      percentageImprovement: percentageImprovement,
+      bulkOperationsUsed: bulkOpsUsed,
+      apiCallsActual: actualApiCalls,
+      apiCallsExpected: expectedApiCalls,
+      apiCallReduction: apiCallReduction,
+      itemsPerSecond: totalTime > 0 ? Math.round((itemsProcessed / (totalTime / 1000)) * 100) / 100 : 0
+    };
+    
+  } catch (error) {
+    Logger.log(`[ExportManager] Error calculating performance improvement: ${error.message}`);
+    return {
+      percentageImprovement: 0,
+      error: error.message
+    };
+  }
+};
+
+/**
+ * Get current performance metrics
+ */
+ExportManager.prototype.getPerformanceMetrics = function() {
+  var currentTime = new Date();
+  var elapsedTime = this.performanceMonitor.startTime ? 
+    currentTime - this.performanceMonitor.startTime : 0;
+  
+  return {
+    sessionId: this.sessionId,
+    startTime: this.performanceMonitor.startTime,
+    currentTime: currentTime,
+    elapsedTimeMs: elapsedTime,
+    metrics: this.performanceMonitor.metrics,
+    apiCallCount: this.performanceMonitor.apiCallCount,
+    bulkOperationsUsed: this.performanceMonitor.bulkOperationsUsed,
+    averageTimePerApiCall: this.performanceMonitor.apiCallCount > 0 ? 
+      Math.round(elapsedTime / this.performanceMonitor.apiCallCount) : 0
+  };
+};
+
+/**
+ * Reset performance monitoring for new export session
+ */
+ExportManager.prototype.resetPerformanceMonitoring = function() {
+  this.performanceMonitor = {
+    startTime: null,
+    endTime: null,
+    metrics: {},
+    apiCallCount: 0,
+    bulkOperationsUsed: 0
+  };
+  
+  Logger.log(`[ExportManager] Performance monitoring reset for new session`);
 };
