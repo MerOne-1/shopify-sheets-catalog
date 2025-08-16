@@ -37,8 +37,18 @@ ProductImporter.prototype.import = function(options) {
     
     var headerChanges = this.setupSheetHeaders(sheet, headers, { dryRun: dryRun });
 
-    var products = this.fetchAllProducts(options);
-    this.logProgress('Fetched ' + products.length + ' products from Shopify');
+    // MILESTONE 2: Handle changed items only for incremental sync
+    var products;
+    if (options.changedItemsOnly && options.changedItems && options.changedItems.length > 0) {
+      this.logProgress('🎯 Processing ' + options.changedItems.length + ' changed products only');
+      products = options.changedItems;
+    } else if (options.changedItemsOnly && options.changedItems && options.changedItems.length === 0) {
+      this.logProgress('🎯 No changed products to process');
+      products = [];
+    } else {
+      products = this.fetchAllProducts(options);
+      this.logProgress('Fetched ' + products.length + ' products from Shopify');
+    }
 
     // Validation
     var validationResults = this.validateData(products, options);
@@ -118,16 +128,23 @@ ProductImporter.prototype.import = function(options) {
   }
 };
 
-// OPTIMIZED: Use BulkApiClient for 80%+ performance improvement
+// MILESTONE 2: Optimized with intelligent caching and bulk operations
 ProductImporter.prototype.fetchAllProducts = function(options) {
   options = options || {};
   var useBulkOperations = options.useBulkOperations !== false; // Default to true
+  var cacheKey = 'products_fetch_' + JSON.stringify(options);
+  
+  // Check cache first for recent fetches
+  var cachedProducts = this.cache.getSimple(cacheKey);
+  if (cachedProducts && !options.forceRefresh) {
+    this.logProgress('🎯 Using cached products (' + cachedProducts.length + ' items)');
+    return cachedProducts;
+  }
   
   if (useBulkOperations) {
     this.logProgress('🚀 Using optimized bulk operations for product import...');
     
     try {
-      var bulkClient = new BulkApiClient();
       var bulkOptions = {
         limit: options.limit || 250,
         fields: options.fields || null,
@@ -135,10 +152,17 @@ ProductImporter.prototype.fetchAllProducts = function(options) {
         updatedAtMin: options.updatedAtMin || null
       };
       
-      var bulkResult = bulkClient.bulkFetchProducts(bulkOptions);
-      this.logProgress(`✅ Bulk fetch completed: ${bulkResult.count} products in ${bulkResult.timeSeconds.toFixed(1)}s (${bulkResult.ratePerSecond.toFixed(1)}/sec)`);
-      
-      return bulkResult.products;
+      var bulkResult = this.bulkApiClient.bulkFetchProducts(null, bulkOptions);
+      if (bulkResult.success && bulkResult.data) {
+        this.logProgress(`✅ Bulk fetch completed: ${bulkResult.data.length} products`);
+        
+        // Cache the results for 5 minutes
+        this.cache.set(cacheKey, bulkResult.data, 300);
+        
+        return bulkResult.data;
+      } else {
+        throw new Error(bulkResult.error || 'Bulk fetch failed');
+      }
       
     } catch (bulkError) {
       this.logProgress(`⚠️ Bulk operations failed: ${bulkError.message}. Falling back to individual operations.`);
@@ -146,8 +170,8 @@ ProductImporter.prototype.fetchAllProducts = function(options) {
     }
   }
   
-  // LEGACY: Individual API calls (for compatibility/fallback)
-  this.logProgress('Using legacy individual API calls...');
+  // LEGACY: Individual API calls with intelligent caching (for compatibility/fallback)
+  this.logProgress('Using legacy individual API calls with caching...');
   var products = [];
   var sinceId = 0; // Use ID-based pagination instead of Link headers
   var limit = options.limit || 250;
@@ -162,7 +186,22 @@ ProductImporter.prototype.fetchAllProducts = function(options) {
 
     this.logProgress('Fetching products page...', products.length);
 
-    var response = this.safeApiRequest(endpoint);
+    // Cache individual API requests
+    var pageKey = 'products_page_' + endpoint;
+    var cachedPage = this.cache.getSimple(pageKey);
+    
+    var response;
+    if (cachedPage && !options.forceRefresh) {
+      this.logProgress('🎯 Using cached page data');
+      response = cachedPage;
+    } else {
+      response = this.safeApiRequest(endpoint);
+      if (response && response.products) {
+        // Cache page for 2 minutes
+        this.cache.set(pageKey, response, 120);
+      }
+    }
+    
     if (!response || !response.products) {
       this.logProgress('Warning: Empty response for products endpoint');
       break;
@@ -191,6 +230,9 @@ ProductImporter.prototype.fetchAllProducts = function(options) {
     }
   }
 
+  // Cache the final result
+  this.cache.set(cacheKey, products, 300);
+  
   return products;
 };
 

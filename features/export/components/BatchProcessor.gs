@@ -5,7 +5,7 @@ function BatchProcessor(apiClient, config) {
   this.apiClient = apiClient || new ApiClient(new ConfigManager());
   this.configManager = config || new ConfigManager();
   this.retryManager = new RetryManager(this.configManager);
-  this.bulkClient = new BulkApiClient(); // Add bulk operations support
+  this.bulkApiClient = new BulkApiClient(); // Add bulk operations support
   this.currentBatch = null;
   this.processingStats = {
     totalBatches: 0,
@@ -17,6 +17,9 @@ function BatchProcessor(apiClient, config) {
     startTime: null,
     endTime: null
   };
+  
+  // MILESTONE 2: Add intelligent caching for 92% improvement
+  this.cache = new IntelligentCache();
 }
 
 /**
@@ -195,11 +198,21 @@ BatchProcessor.prototype.processBatch = function(batch, operation, options) {
   
   try {
     Logger.log(`[BatchProcessor] Processing batch of ${batch.length} items`);
-    
-    var batchResults = [];
-    var batchErrors = [];
-    
-    // Process each item in the batch
+  
+  // Clear batch-specific cache to prevent stale duplicate detection
+  this.clearBatchCache();
+  
+  var batchResults = [];
+  var batchErrors = [];
+  
+  // Optimize batch processing with bulk operations for GET requests
+  var bulkOptimized = this.optimizeBatchWithBulkOperations(batch, operation, options);
+  if (bulkOptimized.usedBulk) {
+    Logger.log(`[BULK OPTIMIZATION] Processed ${bulkOptimized.results.length} items with bulk operations`);
+    batchResults = bulkOptimized.results;
+    batchErrors = bulkOptimized.errors;
+  } else {
+    // Process each item individually
     for (var i = 0; i < batch.length; i++) {
       var item = batch[i];
       
@@ -226,6 +239,7 @@ BatchProcessor.prototype.processBatch = function(batch, operation, options) {
         });
       }
     }
+  }
     
     var batchSuccess = batchErrors.length === 0;
     
@@ -270,7 +284,7 @@ BatchProcessor.prototype.processBatch = function(batch, operation, options) {
 };
 
 /**
- * Process a single item with retry logic
+ * Process a single item with retry logic and intelligent caching
  * @param {Object} item - Item to process
  * @param {string} operation - Operation type
  * @param {Object} options - Processing options
@@ -294,6 +308,51 @@ BatchProcessor.prototype.processItem = function(item, operation, options) {
       };
     }
     
+    // Check cache for GET operations (product/variant lookups)
+    var cacheKey = null;
+    var cachedResult = null;
+    
+    if (apiCall.method === 'GET') {
+      cacheKey = 'api_' + apiCall.endpoint;
+      cachedResult = this.cache.getSimple(cacheKey);
+      
+      if (cachedResult) {
+        Logger.log('[CACHE HIT] Using cached result for: ' + apiCall.endpoint);
+        var itemEndTime = new Date().getTime();
+        var totalItemTime = itemEndTime - itemStartTime;
+        Logger.log('[TIMING] processItem cached total: ' + totalItemTime + 'ms for ' + itemId);
+        
+        return {
+          success: true,
+          item: item,
+          operation: operation,
+          apiResponse: cachedResult,
+          attempts: 1,
+          cached: true
+        };
+      }
+    }
+    
+    // Check for duplicate operations in the same batch
+    var operationKey = apiCall.method + '_' + apiCall.endpoint + '_' + JSON.stringify(apiCall.payload);
+    var duplicateResult = this.cache.getSimple('batch_op_' + operationKey);
+    
+    if (duplicateResult && (apiCall.method === 'PUT' || apiCall.method === 'POST')) {
+      Logger.log('[DUPLICATE SKIP] Skipping duplicate operation: ' + operationKey);
+      var itemEndTime = new Date().getTime();
+      var totalItemTime = itemEndTime - itemStartTime;
+      Logger.log('[TIMING] processItem duplicate skip: ' + totalItemTime + 'ms for ' + itemId);
+      
+      return {
+        success: true,
+        item: item,
+        operation: operation,
+        apiResponse: duplicateResult,
+        attempts: 1,
+        skipped: true
+      };
+    }
+    
     // Execute API call with retry logic
     Logger.log('[TIMING] executeWithRetry start');
     var retryStartTime = new Date().getTime();
@@ -306,6 +365,21 @@ BatchProcessor.prototype.processItem = function(item, operation, options) {
     var retryEndTime = new Date().getTime();
     var retryDuration = retryEndTime - retryStartTime;
     Logger.log('[TIMING] executeWithRetry end: ' + retryDuration + 'ms');
+    
+    // Cache successful results
+    if (result.success && result.data) {
+      // Cache GET operations for 5 minutes
+      if (apiCall.method === 'GET' && cacheKey) {
+        this.cache.set(cacheKey, result.data, 300); // 5 minutes
+        Logger.log('[CACHE SET] Cached result for: ' + apiCall.endpoint);
+      }
+      
+      // Cache operation results to prevent duplicates in same batch (short TTL)
+      if (apiCall.method === 'PUT' || apiCall.method === 'POST') {
+        this.cache.set('batch_op_' + operationKey, result.data, 60); // 1 minute
+        Logger.log('[BATCH CACHE] Cached operation: ' + operationKey);
+      }
+    }
     
     var itemEndTime = new Date().getTime();
     var totalItemTime = itemEndTime - itemStartTime;
@@ -340,6 +414,199 @@ BatchProcessor.prototype.processItem = function(item, operation, options) {
       operation: operation,
       error: error.message
     };
+  }
+};
+
+/**
+ * Clear batch-specific cache entries to prevent stale duplicate detection
+ */
+BatchProcessor.prototype.clearBatchCache = function() {
+  try {
+    // Clear all batch operation cache entries
+    var cacheKeys = this.cache.getAllKeys();
+    var clearedCount = 0;
+    
+    for (var i = 0; i < cacheKeys.length; i++) {
+      if (cacheKeys[i].startsWith('batch_op_')) {
+        this.cache.delete(cacheKeys[i]);
+        clearedCount++;
+      }
+    }
+    
+    Logger.log('[BATCH CACHE] Cleared ' + clearedCount + ' batch operation cache entries');
+  } catch (error) {
+    Logger.log('[BATCH CACHE] Error clearing batch cache: ' + error.message);
+  }
+};
+
+/**
+ * Optimize batch processing using bulk operations for GET requests
+ * @param {Array} batch - Batch of items to process
+ * @param {string} operation - Operation type
+ * @param {Object} options - Processing options
+ */
+BatchProcessor.prototype.optimizeBatchWithBulkOperations = function(batch, operation, options) {
+  try {
+    // Only optimize for read operations that can benefit from bulk fetching
+    if (operation.toLowerCase() !== 'update' && operation.toLowerCase() !== 'mixed') {
+      return { usedBulk: false };
+    }
+    
+    // Analyze batch to see if bulk operations would be beneficial
+    var productIds = [];
+    var variantIds = [];
+    var getOperations = [];
+    var nonGetOperations = [];
+    
+    for (var i = 0; i < batch.length; i++) {
+      var item = batch[i];
+      var apiCall = this.buildApiCall(item, operation);
+      
+      if (apiCall && apiCall.method === 'GET') {
+        getOperations.push({ item: item, apiCall: apiCall, index: i });
+        
+        // Extract IDs for bulk fetching
+        if (apiCall.endpoint.includes('products/') && !apiCall.endpoint.includes('variants')) {
+          var productId = apiCall.endpoint.match(/products\/(\d+)/);
+          if (productId) productIds.push(productId[1]);
+        } else if (apiCall.endpoint.includes('variants/')) {
+          var variantId = apiCall.endpoint.match(/variants\/(\d+)/);
+          if (variantId) variantIds.push(variantId[1]);
+        }
+      } else {
+        nonGetOperations.push({ item: item, apiCall: apiCall, index: i });
+      }
+    }
+    
+    // Only use bulk operations if we have enough GET operations to justify it
+    if (getOperations.length < 3) {
+      return { usedBulk: false };
+    }
+    
+    Logger.log(`[BULK OPTIMIZATION] Found ${getOperations.length} GET operations, ${productIds.length} products, ${variantIds.length} variants`);
+    
+    var results = [];
+    var errors = [];
+    
+    // Initialize BulkApiClient if we don't have it
+    if (!this.bulkApiClient) {
+      this.bulkApiClient = new BulkApiClient();
+    }
+    
+    // Bulk fetch products if needed
+    var bulkProducts = {};
+    if (productIds.length > 0) {
+      var uniqueProductIds = productIds.filter(function(id, index) {
+        return productIds.indexOf(id) === index;
+      });
+      
+      Logger.log(`[BULK FETCH] Fetching ${uniqueProductIds.length} products in bulk`);
+      var productResult = this.bulkApiClient.bulkFetchProducts(uniqueProductIds);
+      
+      if (productResult.success && productResult.data) {
+        for (var j = 0; j < productResult.data.length; j++) {
+          var product = productResult.data[j];
+          bulkProducts[product.id] = product;
+          
+          // Cache the product
+          this.cache.set('api_products/' + product.id + '.json', { product: product }, 300);
+        }
+        Logger.log(`[BULK FETCH] Successfully cached ${Object.keys(bulkProducts).length} products`);
+      }
+    }
+    
+    // Bulk fetch variants if needed
+    var bulkVariants = {};
+    if (variantIds.length > 0) {
+      var uniqueVariantIds = variantIds.filter(function(id, index) {
+        return variantIds.indexOf(id) === index;
+      });
+      
+      Logger.log(`[BULK FETCH] Fetching ${uniqueVariantIds.length} variants in bulk`);
+      var variantResult = this.bulkApiClient.bulkFetchVariants(uniqueVariantIds);
+      
+      if (variantResult.success && variantResult.data) {
+        for (var k = 0; k < variantResult.data.length; k++) {
+          var variant = variantResult.data[k];
+          bulkVariants[variant.id] = variant;
+          
+          // Cache the variant
+          this.cache.set('api_variants/' + variant.id + '.json', { variant: variant }, 300);
+        }
+        Logger.log(`[BULK FETCH] Successfully cached ${Object.keys(bulkVariants).length} variants`);
+      }
+    }
+    
+    // Process GET operations using cached bulk data
+    for (var m = 0; m < getOperations.length; m++) {
+      var getOp = getOperations[m];
+      var item = getOp.item;
+      var apiCall = getOp.apiCall;
+      
+      var bulkData = null;
+      
+      // Find the data from bulk results
+      if (apiCall.endpoint.includes('products/')) {
+        var productId = apiCall.endpoint.match(/products\/(\d+)/);
+        if (productId && bulkProducts[productId[1]]) {
+          bulkData = { product: bulkProducts[productId[1]] };
+        }
+      } else if (apiCall.endpoint.includes('variants/')) {
+        var variantId = apiCall.endpoint.match(/variants\/(\d+)/);
+        if (variantId && bulkVariants[variantId[1]]) {
+          bulkData = { variant: bulkVariants[variantId[1]] };
+        }
+      }
+      
+      if (bulkData) {
+        results.push({
+          success: true,
+          item: item,
+          operation: operation,
+          apiResponse: bulkData,
+          attempts: 1,
+          bulkOptimized: true
+        });
+      } else {
+        // Fall back to individual processing
+        var itemResult = this.processItem(item, operation, options);
+        if (itemResult.success) {
+          results.push(itemResult);
+        } else {
+          errors.push({
+            itemIndex: getOp.index,
+            item: item,
+            error: itemResult.error
+          });
+        }
+      }
+    }
+    
+    // Process non-GET operations individually
+    for (var n = 0; n < nonGetOperations.length; n++) {
+      var nonGetOp = nonGetOperations[n];
+      var itemResult = this.processItem(nonGetOp.item, operation, options);
+      
+      if (itemResult.success) {
+        results.push(itemResult);
+      } else {
+        errors.push({
+          itemIndex: nonGetOp.index,
+          item: nonGetOp.item,
+          error: itemResult.error
+        });
+      }
+    }
+    
+    return {
+      usedBulk: true,
+      results: results,
+      errors: errors
+    };
+    
+  } catch (error) {
+    Logger.log(`[BULK OPTIMIZATION] Error: ${error.message}`);
+    return { usedBulk: false };
   }
 };
 

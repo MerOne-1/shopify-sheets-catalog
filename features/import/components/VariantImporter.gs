@@ -40,11 +40,24 @@ VariantImporter.prototype.import = function(options) {
     
     var headerChanges = this.setupSheetHeaders(sheet, headers, { dryRun: dryRun });
 
-    // Build product cache for variant enrichment
-    this.buildProductCache();
-
-    var variants = this.fetchAllVariants(options);
-    this.logProgress('Fetched ' + variants.length + ' variants from Shopify');
+    // MILESTONE 2: Handle changed items only for incremental sync
+    var variants;
+    if (options.changedItemsOnly && options.changedItems && options.changedItems.length > 0) {
+      this.logProgress('🎯 Processing ' + options.changedItems.length + ' changed variants only');
+      variants = options.changedItems;
+      // Build product cache for variant enrichment
+      this.buildProductCache();
+    } else if (options.changedItemsOnly && options.changedItems && options.changedItems.length === 0) {
+      this.logProgress('🎯 No changed variants to process');
+      variants = [];
+      // Still need product cache for potential enrichment
+      this.buildProductCache();
+    } else {
+      // Build product cache for variant enrichment
+      this.buildProductCache();
+      variants = this.fetchAllVariants(options);
+      this.logProgress('Fetched ' + variants.length + ' variants from Shopify');
+    }
 
     // Validation
     var validationResults = this.validateData(variants, options);
@@ -125,7 +138,46 @@ VariantImporter.prototype.import = function(options) {
 };
 
 VariantImporter.prototype.buildProductCache = function() {
+  // MILESTONE 2: Use intelligent caching for product cache
+  var cacheKey = 'product_cache_full';
+  var cachedProductCache = this.cache.getSimple(cacheKey);
+  
+  if (cachedProductCache) {
+    this.logProgress('🎯 Using cached product cache (' + Object.keys(cachedProductCache).length + ' products)');
+    this.productCache = cachedProductCache;
+    return;
+  }
+  
   this.logProgress('Building product cache for variant enrichment...');
+  
+  // Try bulk operations first
+  try {
+    var bulkResult = this.bulkApiClient.bulkFetchProducts(null, {
+      limit: 250,
+      fields: 'id,title,handle'
+    });
+    
+    if (bulkResult.success && bulkResult.data) {
+      this.logProgress('🚀 Using bulk operations for product cache');
+      
+      for (var i = 0; i < bulkResult.data.length; i++) {
+        var product = bulkResult.data[i];
+        this.productCache[product.id] = {
+          title: product.title,
+          handle: product.handle
+        };
+      }
+      
+      // Cache for 10 minutes
+      this.cache.set(cacheKey, this.productCache, 600);
+      this.logProgress('Built product cache with ' + Object.keys(this.productCache).length + ' products via bulk operations');
+      return;
+    }
+  } catch (bulkError) {
+    this.logProgress('⚠️ Bulk product cache failed: ' + bulkError.message + '. Using individual calls.');
+  }
+  
+  // Fallback to individual API calls with caching
   var products = [];
   var sinceId = 0;
   var limit = 250;
@@ -137,7 +189,22 @@ VariantImporter.prototype.buildProductCache = function() {
       endpoint += '&since_id=' + sinceId;
     }
 
-    var response = this.safeApiRequest(endpoint);
+    // Cache individual pages
+    var pageKey = 'product_cache_page_' + endpoint;
+    var cachedPage = this.cache.getSimple(pageKey);
+    
+    var response;
+    if (cachedPage) {
+      this.logProgress('🎯 Using cached product page');
+      response = cachedPage;
+    } else {
+      response = this.safeApiRequest(endpoint);
+      if (response && response.products) {
+        // Cache page for 5 minutes
+        this.cache.set(pageKey, response, 300);
+      }
+    }
+    
     if (!response || !response.products) {
       this.logProgress('Warning: Empty response for product cache endpoint');
       break;
@@ -164,11 +231,56 @@ VariantImporter.prototype.buildProductCache = function() {
     }
   }
   
+  // Cache the full product cache
+  this.cache.set(cacheKey, this.productCache, 600);
   this.logProgress('Built product cache with ' + Object.keys(this.productCache).length + ' products');
 };
 
 VariantImporter.prototype.fetchAllVariants = function(options) {
   options = options || {};
+  var cacheKey = 'variants_fetch_' + JSON.stringify(options);
+  
+  // Check cache first for recent fetches
+  var cachedVariants = this.cache.getSimple(cacheKey);
+  if (cachedVariants && !options.forceRefresh) {
+    this.logProgress('🎯 Using cached variants (' + cachedVariants.length + ' items)');
+    return cachedVariants;
+  }
+  
+  // Try bulk operations first
+  try {
+    var bulkResult = this.bulkApiClient.bulkFetchVariants(null, {
+      limit: options.limit || 250,
+      updatedAtMin: options.updatedAtMin || null
+    });
+    
+    if (bulkResult.success && bulkResult.data) {
+      this.logProgress('🚀 Using bulk operations for variant fetch');
+      
+      // Enrich variants with product information
+      for (var i = 0; i < bulkResult.data.length; i++) {
+        var variant = bulkResult.data[i];
+        var productInfo = this.productCache[variant.product_id];
+        if (productInfo) {
+          variant.product_title = productInfo.title;
+          variant.product_handle = productInfo.handle;
+        } else {
+          variant.product_title = 'Product ID: ' + variant.product_id;
+          variant.product_handle = '';
+        }
+      }
+      
+      // Cache the results for 5 minutes
+      this.cache.set(cacheKey, bulkResult.data, 300);
+      this.logProgress(`✅ Bulk variant fetch completed: ${bulkResult.data.length} variants`);
+      
+      return bulkResult.data;
+    }
+  } catch (bulkError) {
+    this.logProgress('⚠️ Bulk variant operations failed: ' + bulkError.message + '. Using individual calls.');
+  }
+  
+  // Fallback to individual API calls with caching
   var variants = [];
   var sinceId = 0;
   var limit = options.limit || 250;
@@ -183,7 +295,22 @@ VariantImporter.prototype.fetchAllVariants = function(options) {
 
     this.logProgress('Fetching variants page...', variants.length);
 
-    var response = this.safeApiRequest(endpoint);
+    // Cache individual API requests
+    var pageKey = 'variants_page_' + endpoint;
+    var cachedPage = this.cache.getSimple(pageKey);
+    
+    var response;
+    if (cachedPage && !options.forceRefresh) {
+      this.logProgress('🎯 Using cached variant page data');
+      response = cachedPage;
+    } else {
+      response = this.safeApiRequest(endpoint);
+      if (response && response.variants) {
+        // Cache page for 2 minutes
+        this.cache.set(pageKey, response, 120);
+      }
+    }
+    
     if (!response || !response.variants) {
       this.logProgress('Warning: Empty response for variants endpoint');
       break;
@@ -222,6 +349,9 @@ VariantImporter.prototype.fetchAllVariants = function(options) {
       break;
     }
   }
+
+  // Cache the final result
+  this.cache.set(cacheKey, variants, 300);
 
   return variants;
 };

@@ -9,6 +9,9 @@ function BaseImporter() {
   this.apiCallCount = 0;
   this.validationErrors = [];
   this.validationWarnings = [];
+  // MILESTONE 2: Initialize intelligent caching and bulk operations
+  this.cache = new IntelligentCache();
+  this.bulkApiClient = new BulkApiClient();
 }
 
 BaseImporter.prototype.calculateHash = function(data) {
